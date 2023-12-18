@@ -50,7 +50,7 @@ extern "C" {
 
 /* Exported Macros -----------------------------------------------------------*/
 /* ADS101x I2C device address */
-#define ADS101X_ADDRESS	0x48 /* ADDR pin connected to GND */
+#define ADS101X_I2C_ADDRESS	0x48 /* ADDR pin connected to GND */
 
 /* Pointer registers */
 #define ADS101X_REG_POINTER_MASK			0x03 /* Point mask */
