@@ -162,6 +162,8 @@ typedef struct {
 	ads101x_gain_t gain;
 	ads101x_data_rate_t data_rate;
 	uint8_t bit_shift;
+	gpio_num_t int_pin;
+	bool is_complete;
 } ads101x_t;
 
 /* Exported variables --------------------------------------------------------*/
@@ -171,6 +173,8 @@ typedef struct {
  * @brief Function that initializes a ADS101x instance
  *
  * @param me       : Pointer to a ads101x_t instance
+ * @param model    : ADS101x model
+ * @param int_pin  : Interrupt pin to indicate a completed ADC conversion
  * @param i2c_bus  : Pointer to a structure with the data to initialize the
  * 								   I2C device
  * @param dev_addr : I2C device address
@@ -179,8 +183,8 @@ typedef struct {
  *
  * @return ESP_OK on success
  */
-esp_err_t ads101x_init(ads101x_t *const me, i2c_bus_t *i2c_bus, uint8_t dev_addr,
-		                 i2c_bus_read_t read, i2c_bus_write_t write);
+esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t int_pin,
+		i2c_bus_t *i2c_bus, uint8_t dev_addr, i2c_bus_read_t read, i2c_bus_write_t write);
 
 /**
  * @brief Function that reads a specific single-ended ADC channel.

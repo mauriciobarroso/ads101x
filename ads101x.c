@@ -81,17 +81,32 @@ static int8_t i2c_write(uint8_t reg_addr, const uint16_t reg_data,
  */
 static void delay_us(uint32_t period_us);
 
+/**
+ * @brief Function that implements a micro seconds delay
+ *
+ * @param arg: todo: write
+ */
+static void IRAM_ATTR isr_handler(void *arg);
+
 /* Exported functions definitions --------------------------------------------*/
 /**
  * @brief Function to initialize a ADS101x instance
  */
-esp_err_t ads101x_init(ads101x_t *const me, i2c_bus_t *i2c_bus, uint8_t dev_addr,
-		                 i2c_bus_read_t read, i2c_bus_write_t write) {
+esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t int_pin,
+		i2c_bus_t *i2c_bus, uint8_t dev_addr, i2c_bus_read_t read, i2c_bus_write_t write) {
 	/* Print initializing message */
 	ESP_LOGI(TAG, "Initializing instance...");
 
 	/* Variable to return error code */
 	esp_err_t ret = ESP_OK;
+
+	/**/
+	me->model = model;
+	me->bit_shift = 4;
+	me->gain = ADS101X_GAIN_TWOTHIRDS;
+	me->data_rate = ADS101X_DATA_RATE_1600SPS;
+	me->is_complete = false;
+	me->int_pin = int_pin;
 
 	/* Add device to bus */
 	ret = i2c_bus_add_dev(i2c_bus, dev_addr, "ads101x", NULL, NULL);
@@ -103,6 +118,18 @@ esp_err_t ads101x_init(ads101x_t *const me, i2c_bus_t *i2c_bus, uint8_t dev_addr
 
 	/**/
 	me->i2c_dev = &i2c_bus->devs.dev[i2c_bus->devs.num - 1]; /* todo: write function to get the dev from name */
+
+	/**/
+	gpio_config_t gpio_conf;
+	gpio_conf.intr_type = GPIO_INTR_NEGEDGE;
+	gpio_conf.mode = GPIO_MODE_INPUT;
+	gpio_conf.pin_bit_mask = 1ULL << me->int_pin;
+	gpio_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+	gpio_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+
+	gpio_config(&gpio_conf);
+  gpio_install_isr_service(0);
+	gpio_isr_handler_add(me->int_pin, isr_handler, (void *)me);
 
 	/* Print successful initialization message */
 	ESP_LOGI(TAG, "Instance initialized successfully");
@@ -122,13 +149,13 @@ esp_err_t ads101x_read_single_ended(ads101x_t *const me,
 
 	/* Check channel argument */
 	if (me->model == ADS101X_MODEL_5) { /* ADS1015 */
-		if (channel > 3) {
+		if (channel > ADS101X_CHANNEL_3) {
 			ESP_LOGE(TAG, "Failed to select channel, must be less than 3");
 			return ESP_FAIL;
 		}
 	}
 	else { /* ADS1013 and ADS1014 */
-		if (channel > 1) {
+		if (channel > ADS101X_CHANNEL_1) {
 			ESP_LOGE(TAG, "Failed to select channel, must be less than 1");
 			return ESP_FAIL;
 		}
@@ -142,12 +169,15 @@ esp_err_t ads101x_read_single_ended(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-	bool conversion_is_complete = false;
+//	do {
+//		delay_us(5 * 1000); /* Wait for 5 ms */
+//		ads101x_conversion_complete(me, &conversion_is_complete);
+//
+//	} while (!me->is_complete);
 
-	do {
-		delay_us(5 * 1000); /* Wait for 5 ms */
-		ads101x_conversion_complete(me, &conversion_is_complete);
-	} while (!conversion_is_complete);
+	while (!me->is_complete) {};
+
+	me->is_complete = false;
 
 	/* Get the las ADC conversion result */
 	ret = ads101x_get_last_conversion_results(me, adc_result);
@@ -462,7 +492,7 @@ esp_err_t ads101x_start_reading(ads101x_t *const me, uint16_t mux,
 		config |= ADS101X_REG_CONFIG_MODE_CONTIN;
 	}
 	else {
-		config |= ADS101X_REG_CONFIG_MODE_CONTIN;
+		config |= ADS101X_REG_CONFIG_MODE_SINGLE;
 	}
 
 	/* Set PGA/voltage range */
@@ -487,7 +517,7 @@ esp_err_t ads101x_start_reading(ads101x_t *const me, uint16_t mux,
 		return ESP_FAIL;
 	}
 
-	if (i2c_write(ADS101X_REG_POINTER_HITHRESH, 0x0000, me->i2c_dev) < 0) {
+	if (i2c_write(ADS101X_REG_POINTER_LOWTHRESH, 0x0000, me->i2c_dev) < 0) {
 		return ESP_FAIL;
 	}
 
@@ -506,11 +536,11 @@ esp_err_t ads101x_conversion_complete(ads101x_t *const me, bool *is_complete) {
 	/* Check if the device is performing a conversion */
 	uint16_t rx_data = 0;
 
-	if (i2c_read(ADS101X_REG_POINTER_CONFIG & 0x8000, &rx_data, me->i2c_dev) < 0) {
+	if (i2c_read(ADS101X_REG_POINTER_CONFIG, &rx_data, me->i2c_dev) < 0) {
 		return ESP_FAIL;
 	}
 
-	*is_complete = (bool)rx_data;
+	*is_complete = (bool)(rx_data & 0x8000);
 
 	/* Return ESP_OK */
 	return ret;
@@ -527,7 +557,7 @@ static int8_t i2c_read(uint8_t reg_addr, uint16_t *reg_data, void *intf) {
 
 	uint8_t buf[2] = {0};
 
-	ret =  dev->read(reg_addr ? &reg_addr : NULL, reg_addr ? 1 : 0, buf, 2, dev);
+	ret =  dev->read(&reg_addr, 1, buf, 2, dev);
 
 	if (ret < 0) {
 		return ret;
@@ -579,4 +609,8 @@ static void delay_us(uint32_t period_us) {
   }
 }
 
+static void IRAM_ATTR isr_handler(void *arg) {
+	ads101x_t *ads101x = (ads101x_t *)arg;
+	ads101x->is_complete = true;
+}
 /***************************** END OF FILE ************************************/
