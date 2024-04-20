@@ -86,14 +86,14 @@ static void delay_us(uint32_t period_us);
  *
  * @param arg: todo: write
  */
-static void IRAM_ATTR isr_handler(void *arg);
+static void isr_handler(void *arg);
 
 /* Exported functions definitions --------------------------------------------*/
 /**
  * @brief Function to initialize a ADS101x instance
  */
 esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t int_pin,
-		i2c_bus_t *i2c_bus, uint8_t dev_addr, i2c_bus_read_t read, i2c_bus_write_t write) {
+		i2c_master_bus_handle_t i2c_bus_handle, uint8_t dev_addr) {
 	/* Print initializing message */
 	ESP_LOGI(TAG, "Initializing instance...");
 
@@ -108,18 +108,18 @@ esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t in
 	me->is_complete = false;
 	me->int_pin = int_pin;
 
-	/* Add device to bus */
-	ret = i2c_bus_add_dev(i2c_bus, dev_addr, "ads101x", NULL, NULL);
+	/* Add device to I2C bus */
+	i2c_device_config_t i2c_dev_conf = {
+			.scl_speed_hz = 400000,
+			.device_address = dev_addr
+	};
 
-	if (ret != ESP_OK) {
-		ESP_LOGE(TAG, "Failed to add device");
+	if (i2c_master_bus_add_device(i2c_bus_handle, &i2c_dev_conf, &me->i2c_dev) != ESP_OK) {
+		ESP_LOGE(TAG, "Failed to add device to I2C bus");
 		return ret;
 	}
 
-	/**/
-	me->i2c_dev = &i2c_bus->devs.dev[i2c_bus->devs.num - 1]; /* todo: write function to get the dev from name */
-
-	/**/
+	/* Configure interrupt pin */
 	gpio_config_t gpio_conf;
 	gpio_conf.intr_type = GPIO_INTR_NEGEDGE;
 	gpio_conf.mode = GPIO_MODE_INPUT;
@@ -383,7 +383,7 @@ esp_err_t ads101x_get_last_conversion_results(ads101x_t *const me,
 	esp_err_t ret = ESP_OK;
 
 	/* Read the conversion result */
-	uint16_t result;
+	uint16_t result = 0;
 
 	if (i2c_read(ADS101X_REG_POINTER_CONVERT, &result, me->i2c_dev) < 0) {
 		return ESP_FAIL;
@@ -552,41 +552,49 @@ esp_err_t ads101x_conversion_complete(ads101x_t *const me, bool *is_complete) {
  * @brief Function that implements the default I2C read transaction
  */
 static int8_t i2c_read(uint8_t reg_addr, uint16_t *reg_data, void *intf) {
-	int8_t ret = 0;
-	i2c_bus_dev_t *dev = (i2c_bus_dev_t *)intf;
+	i2c_master_dev_handle_t i2c_dev = (i2c_master_dev_handle_t)intf;
 
-	uint8_t buf[2] = {0};
+	uint8_t buffer[2] = {0};
 
-	ret =  dev->read(&reg_addr, 1, buf, 2, dev);
-
-	if (ret < 0) {
-		return ret;
+	if (i2c_master_transmit_receive(i2c_dev, &reg_addr, 1, buffer, 2, -1) != ESP_OK) {
+		return -1;
 	}
 
-	*reg_data = (uint16_t)((buf[0] << 8) | buf[1]);
+	*reg_data = (uint16_t)((buffer[0] << 8) | buffer[1]);
 
-	/* Return for success */
-	return ret;
+	return 0;
 }
 /**
  * @brief Function that implements the default I2C write transaction
  */
 static int8_t i2c_write(uint8_t reg_addr, const uint16_t reg_data,
 		                    void *intf) {
-	int8_t ret = 0;
-	i2c_bus_dev_t *dev = (i2c_bus_dev_t *)intf;
+//	int8_t ret = 0;
 
-	uint8_t buf[2] = {(uint8_t)((reg_data & 0xFF00) >> 8),
-			(uint8_t)(reg_data & 0x00FF)};
+	i2c_master_dev_handle_t i2c_dev = (i2c_master_dev_handle_t)intf;
 
-	ret = dev->write(&reg_addr, 1, buf, 2, dev);
+	uint8_t buffer[32] = {0};
 
-	if (ret < 0) {
-		return ret;
+	/* Copy the register address to buffer */
+	uint8_t addr_len = sizeof(reg_addr);
+
+	for (uint8_t i = 0; i < addr_len; i++) {
+		buffer[i] = (reg_addr & (0xFF << ((addr_len - 1 - i) * 8))) >> ((addr_len - 1 - i) * 8);
 	}
 
-	/* Return for success */
-	return ret;
+	/* Copy the data to buffer */
+	uint8_t data_len = sizeof(reg_data);
+
+	for (uint8_t i = 0; i < data_len; i++) {
+		buffer[i + addr_len] = (reg_data & (0xFF << ((data_len - 1 - i) * 8))) >> ((data_len - 1 - i) * 8);
+	}
+
+	/* Transmit buffer */
+	if (i2c_master_transmit(i2c_dev, buffer, addr_len + data_len, -1) != ESP_OK) {
+		return -1;
+	}
+
+	return 0;
 }
 /**
  * @brief Function that implements a micro seconds delay
@@ -609,7 +617,7 @@ static void delay_us(uint32_t period_us) {
   }
 }
 
-static void IRAM_ATTR isr_handler(void *arg) {
+static void isr_handler(void *arg) {
 	ads101x_t *ads101x = (ads101x_t *)arg;
 	ads101x->is_complete = true;
 }

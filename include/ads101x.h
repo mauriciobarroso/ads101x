@@ -46,7 +46,8 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "i2c_bus.h"
+#include "driver/i2c_master.h"
+#include "driver/gpio.h"
 
 /* Exported Macros -----------------------------------------------------------*/
 /* ADS101x I2C device address */
@@ -157,7 +158,7 @@ typedef enum {
 } ads101x_channel_t;
 
 typedef struct {
-	i2c_bus_dev_t *i2c_dev;
+	i2c_master_dev_handle_t i2c_dev;
 	ads101x_model_t model;
 	ads101x_gain_t gain;
 	ads101x_data_rate_t data_rate;
@@ -178,13 +179,11 @@ typedef struct {
  * @param i2c_bus  : Pointer to a structure with the data to initialize the
  * 								   I2C device
  * @param dev_addr : I2C device address
- * @param read     : Pointer to I2C read function
- * @param write    : Pointer to I2C write function
  *
  * @return ESP_OK on success
  */
 esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t int_pin,
-		i2c_bus_t *i2c_bus, uint8_t dev_addr, i2c_bus_read_t read, i2c_bus_write_t write);
+		i2c_master_bus_handle_t i2c_bus_handle, uint8_t dev_addr);
 
 /**
  * @brief Function that reads a specific single-ended ADC channel.
