@@ -165,6 +165,7 @@ typedef struct {
 	uint8_t bit_shift;
 	gpio_num_t int_pin;
 	bool is_complete;
+	bool use_interrupt;
 } ads101x_t;
 
 /* Exported variables --------------------------------------------------------*/
@@ -183,7 +184,7 @@ typedef struct {
  * @return ESP_OK on success
  */
 esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t int_pin,
-		i2c_master_bus_handle_t i2c_bus_handle, uint8_t dev_addr);
+		i2c_master_bus_handle_t i2c_bus_handle, uint8_t dev_addr, bool use_interrupt);
 
 /**
  * @brief Function that reads a specific single-ended ADC channel.
@@ -333,12 +334,10 @@ esp_err_t ads101x_start_reading(ads101x_t *const me, uint16_t mux,
  * @brief Function that check if the ADC reading is complete
  *
  * @param me          : Pointer to a ads101x_t instance
- * @param is_complete : Pointer to value to indicate if a ADC conversion is
- *                      complete
  *
  * @return ESP_OK on success
  */
-esp_err_t ads101x_conversion_complete(ads101x_t *const me, bool *is_complete);
+esp_err_t ads101x_conversion_complete(ads101x_t *const me);
 
 
 #ifdef __cplusplus
