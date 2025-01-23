@@ -35,6 +35,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "ads101x.h"
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -79,10 +81,10 @@ static int8_t i2c_write(uint8_t reg_addr, const uint16_t reg_data,
  *
  * @param period_us: Time in us to delay
  */
-static void delay_us(uint32_t period_us);
+//static void delay_us(uint32_t period_us);
 
 /**
- * @brief Function that implements a micro seconds delay
+ * @brief Function that implements the interrupt service routine
  *
  * @param arg: todo: write
  */
@@ -93,7 +95,7 @@ static void isr_handler(void *arg);
  * @brief Function to initialize a ADS101x instance
  */
 esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t int_pin,
-		i2c_master_bus_handle_t i2c_bus_handle, uint8_t dev_addr) {
+		i2c_master_bus_handle_t i2c_bus_handle, uint8_t dev_addr, bool use_interrupt) {
 	/* Print initializing message */
 	ESP_LOGI(TAG, "Initializing instance...");
 
@@ -107,6 +109,7 @@ esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t in
 	me->data_rate = ADS101X_DATA_RATE_1600SPS;
 	me->is_complete = false;
 	me->int_pin = int_pin;
+	me->use_interrupt = use_interrupt;
 
 	/* Add device to I2C bus */
 	i2c_device_config_t i2c_dev_conf = {
@@ -119,17 +122,19 @@ esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t in
 		return ret;
 	}
 
-	/* Configure interrupt pin */
-	gpio_config_t gpio_conf;
-	gpio_conf.intr_type = GPIO_INTR_NEGEDGE;
-	gpio_conf.mode = GPIO_MODE_INPUT;
-	gpio_conf.pin_bit_mask = 1ULL << me->int_pin;
-	gpio_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-	gpio_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+	if (use_interrupt) {
+		/* Configure interrupt pin */
+		gpio_config_t gpio_conf;
+		gpio_conf.intr_type = GPIO_INTR_NEGEDGE;
+		gpio_conf.mode = GPIO_MODE_INPUT;
+		gpio_conf.pin_bit_mask = 1ULL << me->int_pin;
+		gpio_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+		gpio_conf.pull_up_en = GPIO_PULLUP_ENABLE;
 
-	gpio_config(&gpio_conf);
-  gpio_install_isr_service(0);
-	gpio_isr_handler_add(me->int_pin, isr_handler, (void *)me);
+		gpio_config(&gpio_conf);
+		gpio_install_isr_service(0);
+		gpio_isr_handler_add(me->int_pin, isr_handler, (void *)me);
+	}
 
 	/* Print successful initialization message */
 	ESP_LOGI(TAG, "Instance initialized successfully");
@@ -169,13 +174,12 @@ esp_err_t ads101x_read_single_ended(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-//	do {
-//		delay_us(5 * 1000); /* Wait for 5 ms */
-//		ads101x_conversion_complete(me, &conversion_is_complete);
-//
-//	} while (!me->is_complete);
-
-	while (!me->is_complete) {};
+	do {
+		vTaskDelay(1); /* Wait for 1 tick */
+		if(!me->use_interrupt) {
+			ads101x_conversion_complete(me);
+		}
+	} while (!me->is_complete);
 
 	me->is_complete = false;
 
@@ -207,12 +211,14 @@ esp_err_t ads101x_read_differential_0_1(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-	bool conversion_is_complete = false;
-
 	do {
-		delay_us(5 * 1000); /* Wait for 5 ms */
-		ads101x_conversion_complete(me, &conversion_is_complete);
-	} while (!conversion_is_complete);
+		vTaskDelay(1); /* Wait for 1 tick */
+		if(!me->use_interrupt) {
+			ads101x_conversion_complete(me);
+		}
+	} while (!me->is_complete);
+
+	me->is_complete = false;
 
 	/* Get the las ADC conversion result */
 	ret = ads101x_get_last_conversion_results(me, adc_result);
@@ -242,12 +248,14 @@ esp_err_t ads101x_read_differential_0_3(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-	bool conversion_is_complete = false;
-
 	do {
-		delay_us(5 * 1000); /* Wait for 5 ms */
-		ads101x_conversion_complete(me, &conversion_is_complete);
-	} while (!conversion_is_complete);
+		vTaskDelay(1); /* Wait for 1 tick */
+		if(!me->use_interrupt) {
+			ads101x_conversion_complete(me);
+		}
+	} while (!me->is_complete);
+
+	me->is_complete = false;
 
 	/* Get the las ADC conversion result */
 	ret = ads101x_get_last_conversion_results(me, adc_result);
@@ -277,12 +285,14 @@ esp_err_t ads101x_read_differential_1_3(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-	bool conversion_is_complete = false;
-
 	do {
-		delay_us(5 * 1000); /* Wait for 5 ms */
-		ads101x_conversion_complete(me, &conversion_is_complete);
-	} while (!conversion_is_complete);
+		vTaskDelay(1); /* Wait for 1 tick */
+		if(!me->use_interrupt) {
+			ads101x_conversion_complete(me);
+		}
+	} while (!me->is_complete);
+
+	me->is_complete = false;
 
 	/* Get the las ADC conversion result */
 	ret = ads101x_get_last_conversion_results(me, adc_result);
@@ -312,12 +322,14 @@ esp_err_t ads101x_read_differential_2_3(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-	bool conversion_is_complete = false;
-
 	do {
-		delay_us(5 * 1000); /* Wait for 5 ms */
-		ads101x_conversion_complete(me, &conversion_is_complete);
-	} while (!conversion_is_complete);
+		vTaskDelay(1); /* Wait for 1 tick */
+		if(!me->use_interrupt) {
+			ads101x_conversion_complete(me);
+		}
+	} while (!me->is_complete);
+
+	me->is_complete = false;
 
 	/* Get the las ADC conversion result */
 	ret = ads101x_get_last_conversion_results(me, adc_result);
@@ -528,7 +540,7 @@ esp_err_t ads101x_start_reading(ads101x_t *const me, uint16_t mux,
 /**
  * @brief Function that check if the ADC reading is complete
  */
-esp_err_t ads101x_conversion_complete(ads101x_t *const me, bool *is_complete) {
+esp_err_t ads101x_conversion_complete(ads101x_t *const me) {
 
 	/* Variable to return error code */
 	esp_err_t ret = ESP_OK;
@@ -540,7 +552,7 @@ esp_err_t ads101x_conversion_complete(ads101x_t *const me, bool *is_complete) {
 		return ESP_FAIL;
 	}
 
-	*is_complete = (bool)(rx_data & 0x8000);
+	me->is_complete = (bool)(rx_data & 0x8000);
 
 	/* Return ESP_OK */
 	return ret;
@@ -596,16 +608,18 @@ static int8_t i2c_write(uint8_t reg_addr, const uint16_t reg_data,
 
 	return 0;
 }
+
+
 /**
  * @brief Function that implements a micro seconds delay
  */
-static void delay_us(uint32_t period_us) {
+/*static void delay_us(uint32_t period_us) {
 	uint64_t m = (uint64_t)esp_timer_get_time();
 
   if (period_us) {
   	uint64_t e = (m + period_us);
 
-  	if (m > e) { /* overflow */
+  	if (m > e) { // overflow
   		while ((uint64_t)esp_timer_get_time() > e) {
   			NOP();
   		}
@@ -615,7 +629,7 @@ static void delay_us(uint32_t period_us) {
   		NOP();
   	}
   }
-}
+}*/
 
 static void isr_handler(void *arg) {
 	ads101x_t *ads101x = (ads101x_t *)arg;
