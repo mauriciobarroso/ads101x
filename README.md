@@ -1,4 +1,4 @@
-# ADS101x driver for ESP-IDF and STM32CubeIDE
+# 12-bit ADC ADS101x (ADS1013, ADS1014 and ADS1015) driver for ESP-IDF and STM32CubeIDE
 Driver compatible with ESP-IDF and STM32CubeIDE to use ADS101x 12-bit ADC series
 
 ## Features
