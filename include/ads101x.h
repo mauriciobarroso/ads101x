@@ -89,7 +89,7 @@ extern "C" {
 #define ADS101X_REG_CONFIG_PGA_0_512V		0x0800 /* +/-0.512V range = Gain 8 */
 #define ADS101X_REG_CONFIG_PGA_0_256V		0x0A00 /* +/-0.256V range = Gain 16 */
 #define ADS101X_REG_CONFIG_MODE_MASK		0x0100   /* Mode Mask */
-#define ADS101X_REG_CONFIG_MODE_CONTIN	0x0000 /* Continuous conversion mode */
+#define ADS101X_REG_CONFIG_MODE_CONTINUOUS	0x0000 /* Continuous conversion mode */
 #define ADS101X_REG_CONFIG_MODE_SINGLE	0x0100 /* Power-down single-shot mode */
 #define ADS101X_REG_CONFIG_RATE_MASK		0x00E0 /* Data Rate Mask */
 #define ADS101X_REG_CONFIG_CMODE_MASK		0x0010 /* CMode Mask */
@@ -125,19 +125,19 @@ typedef enum {
 /* Gain settings */
 typedef enum {
 	ADS101X_GAIN_TWOTHIRDS = ADS101X_REG_CONFIG_PGA_6_144V,
-	ADS101X_GAIN_ONE = ADS101X_REG_CONFIG_PGA_4_096V,
-	ADS101X_GAIN_TWO = ADS101X_REG_CONFIG_PGA_2_048V,
-	ADS101X_GAIN_FOUR = ADS101X_REG_CONFIG_PGA_1_024V,
-	ADS101X_GAIN_EIGHT = ADS101X_REG_CONFIG_PGA_0_512V,
-	ADS101X_GAIN_SIXTEEN = ADS101X_REG_CONFIG_PGA_0_256V
+	ADS101X_GAIN_ONE       = ADS101X_REG_CONFIG_PGA_4_096V,
+	ADS101X_GAIN_TWO       = ADS101X_REG_CONFIG_PGA_2_048V,
+	ADS101X_GAIN_FOUR      = ADS101X_REG_CONFIG_PGA_1_024V,
+	ADS101X_GAIN_EIGHT     = ADS101X_REG_CONFIG_PGA_0_512V,
+	ADS101X_GAIN_SIXTEEN   = ADS101X_REG_CONFIG_PGA_0_256V
 } ads101x_gain_t;
 
 /* Data rates */
 typedef enum {
-	ADS101X_DATA_RATE_128SPS =	0x0000,
-	ADS101X_DATA_RATE_250SPS =	0x0020,
-	ADS101X_DATA_RATE_490SPS =	0x0040,
-	ADS101X_DATA_RATE_920SPS =	0x0060,
+	ADS101X_DATA_RATE_128SPS  =	0x0000,
+	ADS101X_DATA_RATE_250SPS  =	0x0020,
+	ADS101X_DATA_RATE_490SPS  =	0x0040,
+	ADS101X_DATA_RATE_920SPS  =	0x0060,
 	ADS101X_DATA_RATE_1600SPS =	0x0080,
 	ADS101X_DATA_RATE_2400SPS =	0x00A0,
 	ADS101X_DATA_RATE_3300SPS =	0x00C0
@@ -146,7 +146,7 @@ typedef enum {
 /* Mode setting */
 typedef enum {
 	ADS101X_MODE_ONESHOT,
-	ADS101X_MODE_CONTINUOS,
+	ADS101X_MODE_CONTINUOUS,
 } ads101x_mode_t;
 
 /* Channels */
@@ -157,14 +157,17 @@ typedef enum {
 	ADS101X_CHANNEL_3 = ADS101X_REG_CONFIG_MUX_SINGLE_3
 } ads101x_channel_t;
 
+/* ADS101x instance structure */
 typedef struct {
 	i2c_master_dev_handle_t i2c_dev;
 	ads101x_model_t model;
 	ads101x_gain_t gain;
 	ads101x_data_rate_t data_rate;
 	uint8_t bit_shift;
-	gpio_num_t int_pin;
+	bool int_en;
+	uint32_t int_pin;
 	bool is_complete;
+	void (* delay_ms)(uint32_t);
 } ads101x_t;
 
 /* Exported variables --------------------------------------------------------*/
@@ -175,15 +178,13 @@ typedef struct {
  *
  * @param me       : Pointer to a ads101x_t instance
  * @param model    : ADS101x model
- * @param int_pin  : Interrupt pin to indicate a completed ADC conversion
- * @param i2c_bus  : Pointer to a structure with the data to initialize the
- * 								   I2C device
+ * @param i2c_bus  : Pointer to a structure with the data to initialize the I2C device
  * @param dev_addr : I2C device address
+ * @param delay_ms : Pointer to delay function in ms
  *
  * @return ESP_OK on success
  */
-esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t int_pin,
-		i2c_master_bus_handle_t i2c_bus_handle, uint8_t dev_addr);
+esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, i2c_master_bus_handle_t i2c_bus_handle, uint8_t dev_addr,void (* delay_ms)(uint32_t));
 
 /**
  * @brief Function that reads a specific single-ended ADC channel.
@@ -330,15 +331,32 @@ esp_err_t ads101x_start_reading(ads101x_t *const me, uint16_t mux,
 		                            ads101x_mode_t mode);
 
 /**
- * @brief Function that check if the ADC reading is complete
+ * @brief Function to check if ADC conversion was completed
  *
- * @param me          : Pointer to a ads101x_t instance
- * @param is_complete : Pointer to value to indicate if a ADC conversion is
- *                      complete
+ * @param me : Pointer to a ads101x_t instance
  *
  * @return ESP_OK on success
  */
-esp_err_t ads101x_conversion_complete(ads101x_t *const me, bool *is_complete);
+esp_err_t ads101x_conversion_complete(ads101x_t *const me);
+
+/**
+ * @brief Function to enable ADS101x interrupt pin. This pin is used to indicante a complete ADC conversion
+ *
+ * @param me      : Pointer to a ads101x_t instance
+ * @param int_pin : Host interrupt pin to connect ADS101x interrupt pin 
+ *
+ * @return ESP_OK on success
+ */
+esp_err_t ads101x_interrupt_enable(ads101x_t *const me, uint32_t int_pin);
+
+/**
+ * @brief Function to disnable ADS101x interrupt pin. This pin is used to indicante a complete ADC conversion
+ *
+ * @param me          : Pointer to a ads101x_t instance
+ *
+ * @return ESP_OK on success
+ */
+esp_err_t ads101x_interrupt_disable(ads101x_t *const me);
 
 
 #ifdef __cplusplus

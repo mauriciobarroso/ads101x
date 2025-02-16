@@ -35,12 +35,14 @@
 /* Includes ------------------------------------------------------------------*/
 #include "ads101x.h"
 
+#include "driver/gpio.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "hal/gpio_types.h"
+#include <sys/_intsup.h>
 
 /* Private macros ------------------------------------------------------------*/
-#define NOP() asm volatile ("nop")
 
 /* External variables --------------------------------------------------------*/
 
@@ -74,12 +76,6 @@ static int8_t i2c_read(uint8_t reg_addr, uint16_t *reg_data, void *intf);
  */
 static int8_t i2c_write(uint8_t reg_addr, const uint16_t reg_data,
 		                    void *intf);
-/**
- * @brief Function that implements a micro seconds delay
- *
- * @param period_us: Time in us to delay
- */
-static void delay_us(uint32_t period_us);
 
 /**
  * @brief Function that implements a micro seconds delay
@@ -92,8 +88,8 @@ static void isr_handler(void *arg);
 /**
  * @brief Function to initialize a ADS101x instance
  */
-esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t int_pin,
-		i2c_master_bus_handle_t i2c_bus_handle, uint8_t dev_addr) {
+esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, i2c_master_bus_handle_t i2c_bus_handle, uint8_t dev_addr, void (* delay_ms)(uint32_t)) 
+{
 	/* Print initializing message */
 	ESP_LOGI(TAG, "Initializing instance...");
 
@@ -106,7 +102,13 @@ esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t in
 	me->gain = ADS101X_GAIN_TWOTHIRDS;
 	me->data_rate = ADS101X_DATA_RATE_1600SPS;
 	me->is_complete = false;
-	me->int_pin = int_pin;
+	me->int_en = false;
+	
+	if (delay_ms == NULL) {
+		return ESP_FAIL;
+	}
+	
+	me->delay_ms = delay_ms;
 
 	/* Add device to I2C bus */
 	i2c_device_config_t i2c_dev_conf = {
@@ -118,18 +120,6 @@ esp_err_t ads101x_init(ads101x_t *const me, ads101x_model_t model, gpio_num_t in
 		ESP_LOGE(TAG, "Failed to add device to I2C bus");
 		return ret;
 	}
-
-	/* Configure interrupt pin */
-	gpio_config_t gpio_conf;
-	gpio_conf.intr_type = GPIO_INTR_NEGEDGE;
-	gpio_conf.mode = GPIO_MODE_INPUT;
-	gpio_conf.pin_bit_mask = 1ULL << me->int_pin;
-	gpio_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-	gpio_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-
-	gpio_config(&gpio_conf);
-  gpio_install_isr_service(0);
-	gpio_isr_handler_add(me->int_pin, isr_handler, (void *)me);
 
 	/* Print successful initialization message */
 	ESP_LOGI(TAG, "Instance initialized successfully");
@@ -169,13 +159,11 @@ esp_err_t ads101x_read_single_ended(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-//	do {
-//		delay_us(5 * 1000); /* Wait for 5 ms */
-//		ads101x_conversion_complete(me, &conversion_is_complete);
-//
-//	} while (!me->is_complete);
-
-	while (!me->is_complete) {};
+	ret = ads101x_conversion_complete(me);
+	
+	if (ret != ESP_OK) {
+		return ESP_FAIL;
+	}
 
 	me->is_complete = false;
 
@@ -207,12 +195,11 @@ esp_err_t ads101x_read_differential_0_1(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-	bool conversion_is_complete = false;
-
-	do {
-		delay_us(5 * 1000); /* Wait for 5 ms */
-		ads101x_conversion_complete(me, &conversion_is_complete);
-	} while (!conversion_is_complete);
+	ret = ads101x_conversion_complete(me);
+	
+	if (ret != ESP_OK) {
+		return ESP_FAIL;
+	}
 
 	/* Get the las ADC conversion result */
 	ret = ads101x_get_last_conversion_results(me, adc_result);
@@ -242,12 +229,11 @@ esp_err_t ads101x_read_differential_0_3(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-	bool conversion_is_complete = false;
-
-	do {
-		delay_us(5 * 1000); /* Wait for 5 ms */
-		ads101x_conversion_complete(me, &conversion_is_complete);
-	} while (!conversion_is_complete);
+	ret = ads101x_conversion_complete(me);
+	
+	if (ret != ESP_OK) {
+		return ESP_FAIL;
+	}
 
 	/* Get the las ADC conversion result */
 	ret = ads101x_get_last_conversion_results(me, adc_result);
@@ -277,12 +263,11 @@ esp_err_t ads101x_read_differential_1_3(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-	bool conversion_is_complete = false;
-
-	do {
-		delay_us(5 * 1000); /* Wait for 5 ms */
-		ads101x_conversion_complete(me, &conversion_is_complete);
-	} while (!conversion_is_complete);
+	ret = ads101x_conversion_complete(me);
+	
+	if (ret != ESP_OK) {
+		return ESP_FAIL;
+	}
 
 	/* Get the las ADC conversion result */
 	ret = ads101x_get_last_conversion_results(me, adc_result);
@@ -312,12 +297,11 @@ esp_err_t ads101x_read_differential_2_3(ads101x_t *const me,
 	}
 
 	/* Check if the conversion is complete */
-	bool conversion_is_complete = false;
-
-	do {
-		delay_us(5 * 1000); /* Wait for 5 ms */
-		ads101x_conversion_complete(me, &conversion_is_complete);
-	} while (!conversion_is_complete);
+	ret = ads101x_conversion_complete(me);
+	
+	if (ret != ESP_OK) {
+		return ESP_FAIL;
+	}
 
 	/* Get the las ADC conversion result */
 	ret = ads101x_get_last_conversion_results(me, adc_result);
@@ -347,7 +331,7 @@ esp_err_t ads101x_start_comparator_single_ended(ads101x_t *const me,
 			              ADS101X_REG_CONFIG_CLAT_LATCH |   /* Latching mode */
 										ADS101X_REG_CONFIG_CPOL_ACTVLOW | /* Alert/ready active low */
 										ADS101X_REG_CONFIG_CMODE_TRAD |   /* Traditional comparator */
-										ADS101X_REG_CONFIG_MODE_CONTIN;   /* Continuos conversion
+										ADS101X_REG_CONFIG_MODE_CONTINUOUS;   /* Continuous conversion
 										                                     mode */
 
 	/* Set PGA/voltage range */
@@ -488,8 +472,8 @@ esp_err_t ads101x_start_reading(ads101x_t *const me, uint16_t mux,
 										ADS101X_REG_CONFIG_CMODE_TRAD;    /* Traditional comparator */
 
 	/* Configure the reading mode */
-	if (mode == ADS101X_MODE_CONTINUOS) {
-		config |= ADS101X_REG_CONFIG_MODE_CONTIN;
+	if (mode == ADS101X_MODE_CONTINUOUS) {
+		config |= ADS101X_REG_CONFIG_MODE_CONTINUOUS;
 	}
 	else {
 		config |= ADS101X_REG_CONFIG_MODE_SINGLE;
@@ -526,24 +510,96 @@ esp_err_t ads101x_start_reading(ads101x_t *const me, uint16_t mux,
 }
 
 /**
- * @brief Function that check if the ADC reading is complete
+ * @brief Function to check if ADC conversion was completed
  */
-esp_err_t ads101x_conversion_complete(ads101x_t *const me, bool *is_complete) {
+esp_err_t ads101x_conversion_complete(ads101x_t *const me) {
 
 	/* Variable to return error code */
 	esp_err_t ret = ESP_OK;
-
-	/* Check if the device is performing a conversion */
-	uint16_t rx_data = 0;
-
-	if (i2c_read(ADS101X_REG_POINTER_CONFIG, &rx_data, me->i2c_dev) < 0) {
-		return ESP_FAIL;
+	
+	/* Wait until is_complete is true */
+	while (!me->is_complete) {
+		if (!me->int_en) {
+			/* Check if the device is performing a conversion */
+			uint16_t rx_data = 0;
+		
+			if (i2c_read(ADS101X_REG_POINTER_CONFIG, &rx_data, me->i2c_dev) < 0) {
+				return ESP_FAIL;
+			}
+		
+			me->is_complete = (bool)(rx_data & 0x8000);		
+		}
+		
+		/* Wait for 1 ms to avoid WDT */
+		me->delay_ms(1);
 	}
-
-	*is_complete = (bool)(rx_data & 0x8000);
 
 	/* Return ESP_OK */
 	return ret;
+}
+
+/**
+ * @brief Function to enable ADS101x interrupt pin. This pin is used to indicante a complete ADC conversion
+ */
+esp_err_t ads101x_interrupt_enable(ads101x_t *const me, uint32_t int_pin)
+{
+	/* Variable to return error code */
+	esp_err_t ret = ESP_OK;
+	
+	me->int_pin = int_pin;
+	
+	/* Configure interrupt pin */
+	gpio_config_t gpio_conf;
+	gpio_conf.intr_type = GPIO_INTR_NEGEDGE;
+	gpio_conf.mode = GPIO_MODE_INPUT;
+	gpio_conf.pin_bit_mask = 1ULL << me->int_pin;
+	gpio_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+	gpio_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+
+	ret = gpio_config(&gpio_conf);
+	
+	if (ret != ESP_OK) {
+		return ret;
+	}
+	
+	ret = gpio_install_isr_service(0);
+	
+	if (ret != ESP_OK) {
+		return ret;
+	}
+	
+	ret = gpio_isr_handler_add(me->int_pin, isr_handler, (void *)me);
+	
+	if (ret != ESP_OK) {
+		return ret;
+	}
+	
+	/* Set to true interrupt enable field */
+	me->int_en = true;
+	
+	/* Return ESP_OK */
+	return ret;	
+}
+
+/**
+ * @brief Function to disnable ADS101x interrupt pin. This pin is used to indicante a complete ADC conversion
+ */
+esp_err_t ads101x_interrupt_disable(ads101x_t *const me)
+{
+	/* Variable to return error code */ 
+	esp_err_t ret = ESP_OK;
+	
+	ret = gpio_intr_disable(me->int_pin);
+	
+	if (ret != ESP_OK) {
+		return ret;
+	}
+	
+	/* Set to false interrupt enable field */
+	me->int_en = false;	
+	
+	/* Return ESP_OK */
+	return ret;	
 }
 
 /* Private function definitions ----------------------------------------------*/
@@ -595,26 +651,6 @@ static int8_t i2c_write(uint8_t reg_addr, const uint16_t reg_data,
 	}
 
 	return 0;
-}
-/**
- * @brief Function that implements a micro seconds delay
- */
-static void delay_us(uint32_t period_us) {
-	uint64_t m = (uint64_t)esp_timer_get_time();
-
-  if (period_us) {
-  	uint64_t e = (m + period_us);
-
-  	if (m > e) { /* overflow */
-  		while ((uint64_t)esp_timer_get_time() > e) {
-  			NOP();
-  		}
-  	}
-
-  	while ((uint64_t)esp_timer_get_time() < e) {
-  		NOP();
-  	}
-  }
 }
 
 static void isr_handler(void *arg) {
